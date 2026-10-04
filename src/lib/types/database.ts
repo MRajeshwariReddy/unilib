@@ -166,9 +166,56 @@ export interface Database {
           },
         ];
       };
+      comments: {
+        Row: {
+          id: string;
+          document_id: string;
+          block_id: string;
+          author_id: string;
+          body: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          document_id: string;
+          block_id: string;
+          author_id: string;
+          body: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          document_id?: string;
+          block_id?: string;
+          author_id?: string;
+          body?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "comments_author_id_fkey";
+            columns: ["author_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "comments_block_document_fkey";
+            columns: ["block_id", "document_id"];
+            referencedRelation: "blocks";
+            referencedColumns: ["id", "document_id"];
+          },
+        ];
+      };
     };
     Views: {
-      [_ in never]: never;
+      block_comment_counts: {
+        Row: {
+          document_id: string;
+          block_id: string;
+          comment_count: number;
+        };
+        Relationships: [];
+      };
     };
     Functions: {
       search_blocks: {
