@@ -4,12 +4,13 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { getSafeNextPath } from "@/lib/http/origin";
 import type { UserType } from "@/lib/types/database";
 
 export function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const safeNext = getSafeNextPath(searchParams.get("next"));
 
   const [displayName, setDisplayName] = useState("");
   const [userType, setUserType] = useState<UserType>("student");
@@ -48,7 +49,7 @@ export function SignupForm() {
       return;
     }
 
-    router.push(next);
+    router.push(safeNext);
     router.refresh();
   }
 
@@ -135,7 +136,10 @@ export function SignupForm() {
 
       <p className="mt-4 text-center text-sm text-gray-600">
         Already have an account?{" "}
-        <Link href={`/login${next !== "/" ? `?next=${encodeURIComponent(next)}` : ""}`} className="font-medium text-blue-600 hover:underline">
+        <Link
+          href={`/login${safeNext !== "/" ? `?next=${encodeURIComponent(safeNext)}` : ""}`}
+          className="font-medium text-blue-600 hover:underline"
+        >
           Sign in
         </Link>
       </p>

@@ -4,11 +4,12 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { getSafeNextPath } from "@/lib/http/origin";
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const safeNext = getSafeNextPath(searchParams.get("next"));
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,7 +33,7 @@ export function LoginForm() {
       return;
     }
 
-    router.push(next);
+    router.push(safeNext);
     router.refresh();
   }
 
@@ -88,7 +89,10 @@ export function LoginForm() {
 
       <p className="mt-4 text-center text-sm text-gray-600">
         Don&apos;t have an account?{" "}
-        <Link href={`/signup${next !== "/" ? `?next=${encodeURIComponent(next)}` : ""}`} className="font-medium text-blue-600 hover:underline">
+        <Link
+          href={`/signup${safeNext !== "/" ? `?next=${encodeURIComponent(safeNext)}` : ""}`}
+          className="font-medium text-blue-600 hover:underline"
+        >
           Sign up
         </Link>
       </p>
