@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { AskPanel } from "./AskPanel";
+import { RelatedPanel } from "./RelatedPanel";
 
 export interface SidePanelProps {
   documentId: string;
@@ -78,11 +79,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
           />
         )}
 
-        {activeTab === "related" && (
-          <div className="p-4 text-xs text-gray-500">
-            External suggestions from OpenAlex — not UniLib resources.
-          </div>
-        )}
+        {activeTab === "related" && <RelatedPanel documentId={documentId} />}
       </div>
     </aside>
   );
