@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import React from "react";
 import {
   fetchRelatedReadings,
   normalizeAuthors,
   normalizeWork,
+  clearOpenAlexCache,
+  OPENALEX_CACHE_TTL_MS,
 } from "@/lib/openalex/client";
 import { RelatedPanel } from "@/components/reader/RelatedPanel";
 import { OpenAlexWorkRaw } from "@/lib/openalex/types";
@@ -58,42 +60,81 @@ describe("T16: OpenAlex Work Normalization & DOI URL Handling", () => {
   });
 });
 
-describe("T16: OpenAlex Client Caching & Fallback", () => {
-  it("caps results at 5 items and passes 24h revalidate option", async () => {
-    let capturedOptions: RequestInit | undefined;
-
-    const rawResults = Array.from({ length: 10 }, (_, i) => ({
-      id: `https://openalex.org/W${i}`,
-      display_name: `Work Title ${i}`,
-      doi: `https://doi.org/10.1000/${i}`,
-      publication_year: 2020 + i,
-    }));
-
-    const mockFetch = vi.fn().mockImplementation(async (_url: string, options?: RequestInit) => {
-      capturedOptions = options;
-      return new Response(JSON.stringify({ results: rawResults }), { status: 200 });
-    });
-
-    const res = await fetchRelatedReadings({
-      queryText: "Computer Science",
-      customFetch: mockFetch as unknown as typeof fetch,
-    });
-
-    expect(res.status).toBe("ok");
-    expect(res.results).toHaveLength(5);
-    expect((capturedOptions as { next?: { revalidate?: number } })?.next?.revalidate).toBe(86400);
+describe("T16: OpenAlex 24-Hour Deterministic Caching Behavior", () => {
+  beforeEach(() => {
+    clearOpenAlexCache();
   });
 
-  it("returns status 'unavailable' gracefully on HTTP error or timeout without throwing", async () => {
-    const mockFetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
+  it("demonstrates cache miss, cache hit, 24h expiry refresh, and un-poisoned failure retry", async () => {
+    const startTime = 1700000000000; // fixed baseline timestamp
+    const sampleResults = [
+      {
+        id: "https://openalex.org/W1",
+        display_name: "Grounded AI Reading",
+        doi: "https://doi.org/10.1000/1",
+        publication_year: 2024,
+      },
+    ];
 
-    const res = await fetchRelatedReadings({
-      queryText: "Artificial Intelligence",
-      customFetch: mockFetch as unknown as typeof fetch,
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify({ results: sampleResults }), { status: 200 });
     });
 
-    expect(res.status).toBe("unavailable");
-    expect(res.results).toHaveLength(0);
+    // 1. Initial Request = Cache Miss (executes fetch)
+    const res1 = await fetchRelatedReadings({
+      queryText: "Quantum Mechanics",
+      customFetch: mockFetch as unknown as typeof fetch,
+      now: startTime,
+    });
+
+    expect(res1.status).toBe("ok");
+    expect(res1.results).toHaveLength(1);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // 2. Second Request within 24 Hours = Cache Hit (no second fetch call made)
+    const res2 = await fetchRelatedReadings({
+      queryText: "Quantum Mechanics",
+      customFetch: mockFetch as unknown as typeof fetch,
+      now: startTime + 12 * 60 * 60 * 1000, // +12 hours
+    });
+
+    expect(res2.status).toBe("ok");
+    expect(res2.results).toHaveLength(1);
+    expect(mockFetch).toHaveBeenCalledTimes(1); // Call count remains 1 (Cache Hit!)
+
+    // 3. Request after 24 Hours = Cache Expired & Refreshed (executes fresh fetch call)
+    const res3 = await fetchRelatedReadings({
+      queryText: "Quantum Mechanics",
+      customFetch: mockFetch as unknown as typeof fetch,
+      now: startTime + OPENALEX_CACHE_TTL_MS + 1000, // +24 hours and 1 sec
+    });
+
+    expect(res3.status).toBe("ok");
+    expect(res3.results).toHaveLength(1);
+    expect(mockFetch).toHaveBeenCalledTimes(2); // Call count increased to 2 (Refreshed!)
+
+    // 4. Failure/Fallback behavior does not poison cache permanently
+    clearOpenAlexCache();
+    const failingFetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
+
+    const resFail = await fetchRelatedReadings({
+      queryText: "Failing Query",
+      customFetch: failingFetch as unknown as typeof fetch,
+      now: startTime,
+    });
+
+    expect(resFail.status).toBe("unavailable");
+    expect(resFail.results).toHaveLength(0);
+
+    // Subsequent request with working fetch succeeds
+    const resRecover = await fetchRelatedReadings({
+      queryText: "Failing Query",
+      customFetch: mockFetch as unknown as typeof fetch,
+      now: startTime + 1000,
+    });
+
+    expect(resRecover.status).toBe("ok");
+    expect(resRecover.results).toHaveLength(1);
   });
 });
 

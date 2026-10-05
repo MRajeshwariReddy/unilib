@@ -1,10 +1,24 @@
 import "server-only";
 import { OpenAlexResponse, OpenAlexWorkRaw, RelatedReading } from "./types";
 
+export const OPENALEX_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+interface CacheEntry {
+  data: OpenAlexResponse;
+  expiresAt: number;
+}
+
+const openAlexCache = new Map<string, CacheEntry>();
+
+export function clearOpenAlexCache(): void {
+  openAlexCache.clear();
+}
+
 export interface FetchRelatedReadingsOptions {
   queryText: string;
   apiKey?: string;
   customFetch?: typeof fetch;
+  now?: number;
 }
 
 export function normalizeAuthors(authorships?: OpenAlexWorkRaw["authorships"]): string {
@@ -56,11 +70,24 @@ export function normalizeWork(work: OpenAlexWorkRaw): RelatedReading {
 export async function fetchRelatedReadings(
   options: FetchRelatedReadingsOptions
 ): Promise<OpenAlexResponse> {
-  const { queryText, apiKey = process.env.OPENALEX_API_KEY, customFetch = fetch } = options;
+  const {
+    queryText,
+    apiKey = process.env.OPENALEX_API_KEY,
+    customFetch = fetch,
+    now = Date.now(),
+  } = options;
 
   const trimmedQuery = queryText.trim().slice(0, 200);
   if (!trimmedQuery) {
     return { status: "unavailable", results: [] };
+  }
+
+  const cacheKey = trimmedQuery.toLowerCase();
+  const cached = openAlexCache.get(cacheKey);
+
+  // 24-hour cache hit check
+  if (cached && now < cached.expiresAt) {
+    return cached.data;
   }
 
   const searchParams = new URLSearchParams({
@@ -109,11 +136,19 @@ export async function fetchRelatedReadings(
       }
     }
 
-    return {
+    const resultData: OpenAlexResponse = {
       status: "ok",
       query: trimmedQuery,
       results: normalizedList,
     };
+
+    // Cache successful 24-hour results
+    openAlexCache.set(cacheKey, {
+      data: resultData,
+      expiresAt: now + OPENALEX_CACHE_TTL_MS,
+    });
+
+    return resultData;
   } catch {
     clearTimeout(timeoutId);
     return { status: "unavailable", results: [] };
