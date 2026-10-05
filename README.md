@@ -29,7 +29,7 @@
 - **Framework:** Next.js 15 (App Router, Server Components, Route Handlers)
 - **Frontend:** React 19, Tailwind CSS, TypeScript (`strict: true`)
 - **Backend & Database:** Supabase (PostgreSQL, Supabase Auth, Storage)
-- **AI Integration:** Server-side AI abstraction (`AIProvider`) supporting Anthropic Claude API (`claude-3-5-haiku`) and Mock provider for offline testing.
+- **AI Integration:** Server-side AI abstraction (`AIProvider`) supporting Anthropic Claude API (`claude-3-5-haiku-20241022`) and Mock provider for offline testing.
 - **External Scholarly API:** OpenAlex REST API with server-side 24-hour caching.
 - **Testing & Quality:** Vitest, ESLint, TypeScript `tsc --noEmit`, custom secret-leak scanner script.
 
@@ -103,8 +103,7 @@ AI Provider API (Anthropic)    OpenAlex API
 
 5. **Run Verification Suite:**
    ```bash
-   npm run test          # Run Vitest unit test suite (68 tests)
-   npm run eval:ai       # Run AI grounding evaluation
+   npm run test          # Run Vitest test suite (68 unit & evaluation tests)
    npm run lint          # Run ESLint
    npm run typecheck     # Run TypeScript checking
    npm run secret-scan   # Run build secret leak scan
