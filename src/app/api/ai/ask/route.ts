@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { askInputSchema, executeAskPipeline } from "@/lib/ai/ask";
-import { MockAIProvider } from "@/lib/ai/providers/mock";
+import { getAIProvider } from "@/lib/ai";
 import { ContextBlock } from "@/lib/ai/types";
 
 export const maxDuration = 60;
@@ -103,12 +103,12 @@ export async function POST(request: NextRequest) {
 
   const input = parseInput.data;
 
-  // 5. Execute Pipeline with Real Supabase Client
+  // 5. Execute Pipeline with Real Supabase Client & Factory Provider
   const pipelineResult = await executeAskPipeline({
     input,
     userId,
     deps: {
-      provider: new MockAIProvider(),
+      provider: getAIProvider(),
       async fetchUserRequests({ userId: uid, since }) {
         const { data } = await supabase
           .from("ai_requests")
@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
         return data.id;
       },
       async updateLogResult(params) {
-        // Securely finalize request via RPC function (prevents direct client table updates)
+        // Securely finalize request via RPC function
         await supabase.rpc("finalize_ai_request", {
           p_request_id: params.requestId,
           p_status: params.status,
