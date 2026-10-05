@@ -63,6 +63,71 @@ CREATE TRIGGER tr_enforce_ai_request_concurrency
     FOR EACH ROW
     EXECUTE FUNCTION public.enforce_ai_request_concurrency();
 
+-- SECURITY DEFINER function to securely finalize/update AI request results
+-- Verifies caller is the owner (auth.uid() = user_id) and row is currently pending
+CREATE OR REPLACE FUNCTION public.finalize_ai_request(
+    p_request_id uuid,
+    p_status text,
+    p_retrieval_mode text DEFAULT NULL,
+    p_context_block_count integer DEFAULT NULL,
+    p_refusal_reason text DEFAULT NULL,
+    p_error_code text DEFAULT NULL,
+    p_provider text DEFAULT NULL,
+    p_model text DEFAULT NULL,
+    p_input_tokens integer DEFAULT NULL,
+    p_output_tokens integer DEFAULT NULL,
+    p_latency_ms integer DEFAULT NULL,
+    p_citations_returned integer DEFAULT NULL,
+    p_segments_dropped integer DEFAULT NULL,
+    p_response jsonb DEFAULT NULL
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_user_id uuid;
+    v_current_status text;
+BEGIN
+    SELECT user_id, status INTO v_user_id, v_current_status
+    FROM public.ai_requests
+    WHERE id = p_request_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'ai_request_not_found';
+    END IF;
+
+    -- Verify caller owns the request and it is currently pending
+    IF v_user_id <> auth.uid() THEN
+        RAISE EXCEPTION 'unauthorized_ai_request_update';
+    END IF;
+
+    IF v_current_status <> 'pending' THEN
+        RAISE EXCEPTION 'ai_request_already_finalized';
+    END IF;
+
+    UPDATE public.ai_requests
+    SET
+        status = p_status,
+        retrieval_mode = p_retrieval_mode,
+        context_block_count = p_context_block_count,
+        refusal_reason = p_refusal_reason,
+        error_code = p_error_code,
+        provider = p_provider,
+        model = p_model,
+        input_tokens = p_input_tokens,
+        output_tokens = p_output_tokens,
+        latency_ms = p_latency_ms,
+        citations_returned = p_citations_returned,
+        segments_dropped = p_segments_dropped,
+        response = p_response
+    WHERE id = p_request_id;
+
+    RETURN true;
+END;
+$$;
+
 DO $$ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies WHERE tablename = 'ai_requests' AND policyname = 'Users can read own ai_requests'
@@ -79,21 +144,15 @@ DO $$ BEGIN
             FOR INSERT TO authenticated
             WITH CHECK (user_id = auth.uid() AND status = 'pending');
     END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_policies WHERE tablename = 'ai_requests' AND policyname = 'Users can update own ai_requests results'
-    ) THEN
-        CREATE POLICY "Users can update own ai_requests results" ON public.ai_requests
-            FOR UPDATE TO authenticated
-            USING (user_id = auth.uid())
-            WITH CHECK (user_id = auth.uid());
-    END IF;
 END $$;
+
+-- Revoke UPDATE policy and privileges on public.ai_requests
+DROP POLICY IF EXISTS "Users can update own ai_requests results" ON public.ai_requests;
 
 REVOKE ALL ON public.ai_requests FROM anon, authenticated;
 GRANT SELECT ON public.ai_requests TO authenticated;
 
--- Tightened column grants: INSERT only allows input fields; audit/output fields forbidden on insert
+-- Tightened column grants: INSERT only allows input fields; NO UPDATE GRANTS
 GRANT INSERT (
     id,
     user_id,
@@ -104,19 +163,5 @@ GRANT INSERT (
     status
 ) ON public.ai_requests TO authenticated;
 
--- UPDATE grants strictly restricted to output/audit fields
-GRANT UPDATE (
-    status,
-    refusal_reason,
-    error_code,
-    retrieval_mode,
-    context_block_count,
-    provider,
-    model,
-    input_tokens,
-    output_tokens,
-    latency_ms,
-    citations_returned,
-    segments_dropped,
-    response
-) ON public.ai_requests TO authenticated;
+-- Grant EXECUTE on finalize_ai_request function to authenticated users
+GRANT EXECUTE ON FUNCTION public.finalize_ai_request TO authenticated;

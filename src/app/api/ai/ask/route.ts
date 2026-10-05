@@ -134,24 +134,23 @@ export async function POST(request: NextRequest) {
         return data.id;
       },
       async updateLogResult(params) {
-        await supabase
-          .from("ai_requests")
-          .update({
-            status: params.status,
-            retrieval_mode: params.retrievalMode,
-            context_block_count: params.contextBlockCount,
-            refusal_reason: params.refusalReason,
-            error_code: params.errorCode,
-            provider: params.provider,
-            model: params.model,
-            input_tokens: params.inputTokens,
-            output_tokens: params.outputTokens,
-            latency_ms: params.latencyMs,
-            citations_returned: params.citationsReturned,
-            segments_dropped: params.segmentsDropped,
-            response: params.response,
-          })
-          .eq("id", params.requestId);
+        // Securely finalize request via RPC function (prevents direct client table updates)
+        await supabase.rpc("finalize_ai_request", {
+          p_request_id: params.requestId,
+          p_status: params.status,
+          p_retrieval_mode: params.retrievalMode,
+          p_context_block_count: params.contextBlockCount,
+          p_refusal_reason: params.refusalReason,
+          p_error_code: params.errorCode,
+          p_provider: params.provider,
+          p_model: params.model,
+          p_input_tokens: params.inputTokens,
+          p_output_tokens: params.outputTokens,
+          p_latency_ms: params.latencyMs,
+          p_citations_returned: params.citationsReturned,
+          p_segments_dropped: params.segmentsDropped,
+          p_response: params.response,
+        });
       },
       async getDocumentInfo(docId) {
         const { data } = await supabase

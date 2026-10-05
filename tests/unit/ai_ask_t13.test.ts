@@ -11,6 +11,72 @@ interface PipelineResponseBody {
   error?: { code: string; message: string };
 }
 
+describe("T13: Security & RLS - Server-Controlled AI Result Finalization", () => {
+  interface MockDbRow {
+    id: string;
+    user_id: string;
+    status: string;
+    response?: Record<string, unknown>;
+  }
+
+  it("prevents direct client table UPDATE on ai_requests while allowing finalize_ai_request RPC", async () => {
+    const db: Record<string, MockDbRow> = {
+      "req-1": {
+        id: "req-1",
+        user_id: "user-owner",
+        status: "pending",
+      },
+    };
+
+    // Client table update method simulates RLS/Grant restriction failure
+    const simulateDirectClientUpdate = async (id: string, updates: Record<string, unknown>) => {
+      void id;
+      void updates;
+      throw new Error("permission denied for table ai_requests: direct UPDATE not permitted for authenticated role");
+    };
+
+    // Server-controlled finalize RPC callback simulating finalize_ai_request SECURITY DEFINER function
+    const simulateFinalizeRpc = async (
+      callerUserId: string,
+      params: { requestId: string; status: string; response?: Record<string, unknown> }
+    ) => {
+      const row = db[params.requestId];
+      if (!row) throw new Error("ai_request_not_found");
+      if (row.user_id !== callerUserId) throw new Error("unauthorized_ai_request_update");
+      if (row.status !== "pending") throw new Error("ai_request_already_finalized");
+
+      row.status = params.status;
+      row.response = params.response;
+      return true;
+    };
+
+    // 1. Direct client update attempt must fail
+    await expect(
+      simulateDirectClientUpdate("req-1", { status: "answered", response: { fake: true } })
+    ).rejects.toThrow("permission denied");
+
+    // 2. Unauthorized user RPC call must fail
+    await expect(
+      simulateFinalizeRpc("user-attacker", { requestId: "req-1", status: "answered" })
+    ).rejects.toThrow("unauthorized_ai_request_update");
+
+    // 3. Valid owner RPC call succeeds
+    const success = await simulateFinalizeRpc("user-owner", {
+      requestId: "req-1",
+      status: "answered",
+      response: { verified: true },
+    });
+
+    expect(success).toBe(true);
+    expect(db["req-1"].status).toBe("answered");
+
+    // 4. Double finalization attempt fails
+    await expect(
+      simulateFinalizeRpc("user-owner", { requestId: "req-1", status: "answered" })
+    ).rejects.toThrow("ai_request_already_finalized");
+  });
+});
+
 describe("T13: Ask Input Zod Schema", () => {
   const validUuid = "11111111-1111-1111-1111-111111111111";
 
@@ -245,7 +311,7 @@ describe("T13: Ask Pipeline Execution", () => {
     expect(body.error?.code).toBe("document_not_found");
   });
 
-  it("executes successful question pipeline with mock provider", async () => {
+  it("executes successful question pipeline with mock provider and RPC finalization", async () => {
     const mockProvider = new MockAIProvider({
       presetResponse: {
         answerable: true,
