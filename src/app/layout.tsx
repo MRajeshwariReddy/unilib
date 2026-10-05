@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Header } from "@/components/layout/Header";
+import Link from "next/link";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -15,7 +15,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-gray-50 text-gray-900 antialiased">
-        <Header />
+        <header className="border-b bg-white">
+          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+            <Link href="/" className="text-xl font-bold text-blue-600">
+              UniLib
+            </Link>
+          </div>
+        </header>
         {children}
       </body>
     </html>

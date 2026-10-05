@@ -1,5 +1,0 @@
-Introduction to Operating Systems
-
-An operating system acts as an intermediary between user and hardware.
-
-Main functions include process management, memory management, and file systems.
