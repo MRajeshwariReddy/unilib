@@ -1,7 +1,22 @@
-# Known Limitations (MVP Scope)
+# UniLib MVP Known Limitations
 
-- **Supported Formats:** Markdown (.md), DOCX (.docx), and Plain Text (.txt) only. PDF format is post-MVP.
-- **Flat Comments:** Comments are attached to paragraphs. No comment replies or threaded discussions in MVP.
-- **AI Capabilities:** Restricted to "Ask a question", "Explain this paragraph", and "Summarize the document".
-- **Single-turn AI:** AI assistant is single-turn and does not maintain conversation history.
-- **Large Documents:** For documents exceeding 100,000 characters, summarization is disabled and FTS mode is used for retrieval.
+This document lists accepted architectural and product limitations for the UniLib MVP.
+
+---
+
+1. **Supported Formats:**
+   - MVP supports `.docx`, `.md`, and `.txt` files only.
+   - PDF files are **post-MVP** (upload form explicitly prompts users to convert PDFs to DOCX or Markdown).
+
+2. **Summarize Preset Threshold:**
+   - Document summarization is available for documents up to **100,000 characters** (~25,000 tokens).
+   - For larger documents, summarization is disabled in the UI and returns `preset_unavailable` from the API. Users can ask specific targeted questions using FTS retrieval.
+
+3. **Flat Paragraph Comments:**
+   - Comments on paragraphs are flat lists (no nested replies or threading in MVP).
+
+4. **Single-Turn AI Assistant:**
+   - Ask UniLib AI operates on a single-turn request basis. There is no multi-turn chat history or conversation memory persisted across requests.
+
+5. **Authentication:**
+   - Email + Password authentication via Supabase Auth. Email confirmation is disabled by default for MVP demos to prevent email service rate limits.
