@@ -29,6 +29,40 @@ CREATE INDEX IF NOT EXISTS ai_requests_document_id_idx ON public.ai_requests (do
 
 ALTER TABLE public.ai_requests ENABLE ROW LEVEL SECURITY;
 
+-- Atomic transaction-level advisory lock function to enforce max 2 concurrent requests
+CREATE OR REPLACE FUNCTION public.enforce_ai_request_concurrency()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    pending_count integer;
+BEGIN
+    -- Transaction-level advisory lock keyed on user_id hash to serialize inserts per user
+    PERFORM pg_advisory_xact_lock(hashtext(NEW.user_id::text));
+
+    SELECT count(*) INTO pending_count
+    FROM public.ai_requests
+    WHERE user_id = NEW.user_id
+      AND status = 'pending'
+      AND created_at >= (now() - interval '2 minutes');
+
+    IF pending_count >= 2 THEN
+        RAISE EXCEPTION 'concurrency_limit_exceeded'
+            USING HINT = 'Maximum 2 concurrent AI requests allowed per user.';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_enforce_ai_request_concurrency ON public.ai_requests;
+CREATE TRIGGER tr_enforce_ai_request_concurrency
+    BEFORE INSERT ON public.ai_requests
+    FOR EACH ROW
+    EXECUTE FUNCTION public.enforce_ai_request_concurrency();
+
 DO $$ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies WHERE tablename = 'ai_requests' AND policyname = 'Users can read own ai_requests'
@@ -37,6 +71,7 @@ DO $$ BEGIN
             FOR SELECT TO authenticated
             USING (user_id = auth.uid());
     END IF;
+
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies WHERE tablename = 'ai_requests' AND policyname = 'Users can insert own pending ai_requests'
     ) THEN
@@ -44,17 +79,32 @@ DO $$ BEGIN
             FOR INSERT TO authenticated
             WITH CHECK (user_id = auth.uid() AND status = 'pending');
     END IF;
+
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies WHERE tablename = 'ai_requests' AND policyname = 'Users can update own ai_requests results'
     ) THEN
         CREATE POLICY "Users can update own ai_requests results" ON public.ai_requests
             FOR UPDATE TO authenticated
-            USING (user_id = auth.uid());
+            USING (user_id = auth.uid())
+            WITH CHECK (user_id = auth.uid());
     END IF;
 END $$;
 
 REVOKE ALL ON public.ai_requests FROM anon, authenticated;
-GRANT SELECT, INSERT ON public.ai_requests TO authenticated;
+GRANT SELECT ON public.ai_requests TO authenticated;
+
+-- Tightened column grants: INSERT only allows input fields; audit/output fields forbidden on insert
+GRANT INSERT (
+    id,
+    user_id,
+    document_id,
+    preset,
+    question,
+    focus_block_id,
+    status
+) ON public.ai_requests TO authenticated;
+
+-- UPDATE grants strictly restricted to output/audit fields
 GRANT UPDATE (
     status,
     refusal_reason,

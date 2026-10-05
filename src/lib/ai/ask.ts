@@ -122,7 +122,20 @@ export async function executeAskPipeline(
         preset: input.preset || null,
         focusBlockId: input.focusBlockId || null,
       });
-    } catch {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes("concurrency_limit_exceeded")) {
+        return {
+          httpStatus: 429,
+          body: {
+            error: {
+              code: "rate_limited",
+              message: "Maximum 2 concurrent AI requests allowed. Please wait for your previous request to finish.",
+              retryAfterSeconds: 30,
+            },
+          },
+        };
+      }
       return {
         httpStatus: 500,
         body: { error: { code: "internal", message: "Failed to record AI request log." } },

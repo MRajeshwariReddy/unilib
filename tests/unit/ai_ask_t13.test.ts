@@ -65,8 +65,17 @@ describe("T13: Ask Input Zod Schema", () => {
   });
 });
 
-describe("T13: AI Rate Limiting", () => {
+describe("T13: AI Rate Limiting & Concurrency", () => {
   const userId = "user-123";
+  const envOriginal = process.env.AI_ENABLED;
+
+  beforeEach(() => {
+    process.env.AI_ENABLED = "true";
+  });
+
+  afterEach(() => {
+    process.env.AI_ENABLED = envOriginal;
+  });
 
   it("allows requests under the limits", async () => {
     const res = await checkAIRateLimit({
@@ -111,6 +120,67 @@ describe("T13: AI Rate Limiting", () => {
     expect(res.allowed).toBe(false);
     expect(res.reason).toBe("concurrency_limit");
     expect(res.retryAfterSeconds).toBe(30);
+  });
+
+  it("demonstrates race-safe atomic rejection when 3rd simultaneous createStartLog call executes", async () => {
+    const validDocId = "22222222-2222-2222-2222-222222222222";
+    let pendingCount = 0;
+
+    // Simulated atomic createStartLog callback simulating the PostgreSQL trigger
+    const atomicCreateStartLog = async () => {
+      if (pendingCount >= 2) {
+        throw new Error("concurrency_limit_exceeded: maximum 2 concurrent AI requests allowed");
+      }
+      pendingCount++;
+      return `req-id-${pendingCount}`;
+    };
+
+    const mockProvider = new MockAIProvider({
+      presetResponse: {
+        answerable: true,
+        refusal_reason: null,
+        segments: [
+          {
+            text: "Sample segment text [1].",
+            citations: [1],
+            evidence_quote: "Sample block text for testing.",
+          },
+        ],
+      },
+    });
+
+    const deps = {
+      provider: mockProvider,
+      createStartLog: atomicCreateStartLog,
+      getDocumentInfo: async () => ({
+        id: validDocId,
+        char_count: 500,
+        status: "ready",
+        title: "Test Document",
+      }),
+      fetchAllBlocks: async () => [
+        { id: "b-1", document_id: validDocId, position: 1, type: "paragraph", heading_level: null, text: "Sample block text for testing." },
+      ] as ContextBlock[],
+    };
+
+    // Trigger 3 simultaneous concurrent pipeline executions
+    const p1 = executeAskPipeline({ input: { documentId: validDocId, question: "Q1" }, userId, deps });
+    const p2 = executeAskPipeline({ input: { documentId: validDocId, question: "Q2" }, userId, deps });
+    const p3 = executeAskPipeline({ input: { documentId: validDocId, question: "Q3" }, userId, deps });
+
+    const results = await Promise.all([p1, p2, p3]);
+
+    const statuses = results.map((r) => r.httpStatus);
+    const rateLimitedCount = statuses.filter((s) => s === 429).length;
+    const okCount = statuses.filter((s) => s === 200).length;
+
+    expect(okCount).toBe(2);
+    expect(rateLimitedCount).toBe(1);
+
+    const rateLimitedRes = results.find((r) => r.httpStatus === 429);
+    const body = rateLimitedRes?.body as PipelineResponseBody;
+    expect(body?.error?.code).toBe("rate_limited");
+    expect(body?.error?.message).toContain("Maximum 2 concurrent AI requests allowed");
   });
 });
 
