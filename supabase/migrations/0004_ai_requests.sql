@@ -64,7 +64,12 @@ CREATE TRIGGER tr_enforce_ai_request_concurrency
     EXECUTE FUNCTION public.enforce_ai_request_concurrency();
 
 -- SECURITY DEFINER function to securely finalize/update AI request results
--- Verifies caller is the owner (auth.uid() = user_id) and row is currently pending
+-- Enforces:
+-- 1. Caller must be authenticated (auth.uid() IS NOT NULL).
+-- 2. Request id must belong to auth.uid().
+-- 3. Request status must be 'pending'.
+-- 4. Transition status must be 'answered', 'refused', or 'error'.
+-- 5. Only result/audit fields are updated; immutable identity fields are untouched.
 CREATE OR REPLACE FUNCTION public.finalize_ai_request(
     p_request_id uuid,
     p_status text,
@@ -90,6 +95,14 @@ DECLARE
     v_user_id uuid;
     v_current_status text;
 BEGIN
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'unauthenticated_ai_request_update';
+    END IF;
+
+    IF p_status NOT IN ('answered', 'refused', 'error') THEN
+        RAISE EXCEPTION 'invalid_final_status';
+    END IF;
+
     SELECT user_id, status INTO v_user_id, v_current_status
     FROM public.ai_requests
     WHERE id = p_request_id;
@@ -98,7 +111,6 @@ BEGIN
         RAISE EXCEPTION 'ai_request_not_found';
     END IF;
 
-    -- Verify caller owns the request and it is currently pending
     IF v_user_id <> auth.uid() THEN
         RAISE EXCEPTION 'unauthorized_ai_request_update';
     END IF;
@@ -146,13 +158,14 @@ DO $$ BEGIN
     END IF;
 END $$;
 
--- Revoke UPDATE policy and privileges on public.ai_requests
+-- Drop any UPDATE policies on public.ai_requests
 DROP POLICY IF EXISTS "Users can update own ai_requests results" ON public.ai_requests;
 
+-- Revoke all UPDATE privileges on table public.ai_requests from anon and authenticated
 REVOKE ALL ON public.ai_requests FROM anon, authenticated;
 GRANT SELECT ON public.ai_requests TO authenticated;
 
--- Tightened column grants: INSERT only allows input fields; NO UPDATE GRANTS
+-- Tightened column grants: INSERT only allows input fields; NO UPDATE GRANTS on table
 GRANT INSERT (
     id,
     user_id,
@@ -163,5 +176,5 @@ GRANT INSERT (
     status
 ) ON public.ai_requests TO authenticated;
 
--- Grant EXECUTE on finalize_ai_request function to authenticated users
+-- Grant EXECUTE on finalize_ai_request function to authenticated role
 GRANT EXECUTE ON FUNCTION public.finalize_ai_request TO authenticated;

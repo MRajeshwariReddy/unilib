@@ -15,15 +15,21 @@ describe("T13: Security & RLS - Server-Controlled AI Result Finalization", () =>
   interface MockDbRow {
     id: string;
     user_id: string;
+    document_id: string;
+    question: string;
+    preset?: string;
+    focus_block_id?: string;
     status: string;
     response?: Record<string, unknown>;
   }
 
-  it("prevents direct client table UPDATE on ai_requests while allowing finalize_ai_request RPC", async () => {
+  it("prevents direct client table UPDATE on ai_requests while allowing finalize_ai_request RPC with strict security boundaries", async () => {
     const db: Record<string, MockDbRow> = {
       "req-1": {
         id: "req-1",
         user_id: "user-owner",
+        document_id: "doc-1",
+        question: "Original Question",
         status: "pending",
       },
     };
@@ -37,30 +43,48 @@ describe("T13: Security & RLS - Server-Controlled AI Result Finalization", () =>
 
     // Server-controlled finalize RPC callback simulating finalize_ai_request SECURITY DEFINER function
     const simulateFinalizeRpc = async (
-      callerUserId: string,
+      callerUserId: string | null,
       params: { requestId: string; status: string; response?: Record<string, unknown> }
     ) => {
+      if (!callerUserId) {
+        throw new Error("unauthenticated_ai_request_update");
+      }
+      if (!["answered", "refused", "error"].includes(params.status)) {
+        throw new Error("invalid_final_status");
+      }
+
       const row = db[params.requestId];
       if (!row) throw new Error("ai_request_not_found");
       if (row.user_id !== callerUserId) throw new Error("unauthorized_ai_request_update");
       if (row.status !== "pending") throw new Error("ai_request_already_finalized");
 
+      // Updates ONLY result/audit fields; immutable identity fields are preserved
       row.status = params.status;
       row.response = params.response;
       return true;
     };
 
-    // 1. Direct client update attempt must fail
+    // 1. Direct client table update attempt fails
     await expect(
       simulateDirectClientUpdate("req-1", { status: "answered", response: { fake: true } })
     ).rejects.toThrow("permission denied");
 
-    // 2. Unauthorized user RPC call must fail
+    // 2. Unauthenticated RPC call fails
+    await expect(
+      simulateFinalizeRpc(null, { requestId: "req-1", status: "answered" })
+    ).rejects.toThrow("unauthenticated_ai_request_update");
+
+    // 3. Unauthorized user RPC call attempting to finalize another user's request fails
     await expect(
       simulateFinalizeRpc("user-attacker", { requestId: "req-1", status: "answered" })
     ).rejects.toThrow("unauthorized_ai_request_update");
 
-    // 3. Valid owner RPC call succeeds
+    // 4. Invalid transition status fails
+    await expect(
+      simulateFinalizeRpc("user-owner", { requestId: "req-1", status: "pending" })
+    ).rejects.toThrow("invalid_final_status");
+
+    // 5. Valid owner RPC call succeeds and preserves identity fields
     const success = await simulateFinalizeRpc("user-owner", {
       requestId: "req-1",
       status: "answered",
@@ -69,8 +93,11 @@ describe("T13: Security & RLS - Server-Controlled AI Result Finalization", () =>
 
     expect(success).toBe(true);
     expect(db["req-1"].status).toBe("answered");
+    expect(db["req-1"].user_id).toBe("user-owner");
+    expect(db["req-1"].document_id).toBe("doc-1");
+    expect(db["req-1"].question).toBe("Original Question");
 
-    // 4. Double finalization attempt fails
+    // 6. Double finalization attempt fails
     await expect(
       simulateFinalizeRpc("user-owner", { requestId: "req-1", status: "answered" })
     ).rejects.toThrow("ai_request_already_finalized");
