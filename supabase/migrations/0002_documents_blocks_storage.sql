@@ -69,7 +69,7 @@ CREATE OR REPLACE FUNCTION public.search_blocks(
 )
 RETURNS TABLE (
   id uuid,
-  position int,
+  "position" int,
   rank real
 )
 LANGUAGE sql
