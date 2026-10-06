@@ -119,37 +119,74 @@ describe("T14: AskPanel Component Unit Tests", () => {
 describe("T14: SidePanel & Reader Integration Unit Tests", () => {
   const docId = "doc-uuid-123";
 
-  it("creates SidePanel element with Ask AI tab", () => {
+  const document = {
+    id: docId,
+    owner_id: "owner-1",
+    title: "Sample Reading",
+    description: null,
+    subject: "Computer Science",
+    license: "cc_by" as const,
+    rights_attested: true,
+    source_format: "md" as const,
+    original_filename: "sample.md",
+    file_size_bytes: 1024,
+    storage_path: "owner-1/doc-uuid-123/original.md",
+    status: "ready" as const,
+    error_code: null,
+    error_message: null,
+    block_count: 1,
+    char_count: 100,
+    parser_version: "1.0",
+    processed_at: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  const blocks = [
+    {
+      id: "b-1",
+      position: 1,
+      type: "paragraph" as const,
+      headingLevel: null,
+      text: "Sample paragraph text.",
+    },
+  ];
+
+  it("creates SidePanel element with its current reader props", () => {
     const el = React.createElement(SidePanel, {
-      documentId: docId,
-      charCount: 50000,
-      isAuthenticated: true,
+      selectedBlockPosition: 1,
+      selectedBlockText: "Sample paragraph text.",
+      comments: [],
+      documentOwnerId: "owner-1",
+      currentUserId: "user-1",
+      onSubmitComment: async () => {},
+      onDeleteComment: () => {},
+      isOpenMobile: false,
+      onCloseMobile: () => {},
     });
 
     expect(el.type).toBe(SidePanel);
-    expect(el.props.documentId).toBe(docId);
+    expect(el.props.selectedBlockPosition).toBe(1);
+    expect(el.props.selectedBlockText).toBe("Sample paragraph text.");
+    expect(el.props.documentOwnerId).toBe("owner-1");
   });
 
-  it("creates Reader element with integrated SidePanel", () => {
+  it("creates Reader element with its current props", () => {
     const el = React.createElement(Reader, {
-      documentId: docId,
-      title: "Sample Reading",
-      charCount: 50000,
-      isAuthenticated: true,
-      blocks: [
-        {
-          id: "b-1",
-          document_id: docId,
-          position: 1,
-          type: "paragraph",
-          heading_level: null,
-          text: "Sample paragraph text.",
-        },
-      ],
+      document,
+      ownerDisplayName: "Test User",
+      ownerUserType: "student",
+      blocks,
+      initialCommentCounts: {
+        "b-1": 0,
+      },
+      currentUserId: "user-1",
     });
 
     expect(el.type).toBe(Reader);
-    expect(el.props.title).toBe("Sample Reading");
+    expect(el.props.document).toEqual(document);
+    expect(el.props.ownerDisplayName).toBe("Test User");
     expect(el.props.blocks).toHaveLength(1);
+    expect(el.props.blocks[0].id).toBe("b-1");
   });
 });
